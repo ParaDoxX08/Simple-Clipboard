@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipDrop — Simple Shared Clipboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .font-mono-code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .drop-active {
+      border-color: currentColor !important;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+      border-radius: 9999px;
+    }
+  </style>
+  <script>
+    // Tailwind Dark Mode configuration support
+    tailwind.config = {
+      darkMode: 'class',
+    }
+  </script>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 selection:bg-slate-900 dark:selection:bg-slate-100 selection:text-white dark:selection:text-slate-900 transition-colors duration-200">
+
+  <!-- Startup Room Code Gate Modal (Always shown first on load/restart) -->
+  <div id="roomGateModal" class="fixed inset-0 z-50 bg-slate-900/50 dark:bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl flex flex-col gap-5">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Enter a Room Code</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Pick any private code and enter the same code on your other devices.</p>
+        </div>
+      </div>
+
+      <form id="roomGateForm" class="flex flex-col gap-3">
+        <div>
+          <label for="gateRoomInput" class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">Private Room Code</label>
+          <div class="flex gap-2">
+            <input
+              id="gateRoomInput"
+              type="text"
+              placeholder="e.g. DESK-402"
+              maxlength="24"
+              required
+              autocomplete="off"
+              class="flex-1 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:border-slate-900 dark:focus:border-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none px-3.5 py-2.5 text-sm font-mono-code font-semibold uppercase text-slate-900 dark:text-white placeholder-slate-400"
+            />
+            <button
+              id="generateRandomRoomBtn"
+              type="button"
+              class="px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-700 transition shrink-0"
+              title="Generate a random code"
+            >
+              Random
+            </button>
+          </div>
+          <p id="gateErrorText" class="text-xs text-red-600 dark:text-red-400 mt-1.5 hidden">Please enter a room code to continue.</p>
+        </div>
+
+        <button
+          type="submit"
+          class="w-full py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-sm transition"
+        >
+          Open Clipboard Room
+        </button>
+      </form>
+
+      <div class="pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+        Works across devices on the same network or different networks. Make sure <span class="font-mono-code text-slate-700 dark:text-slate-300 font-medium">shared_clipboard.html</span> is opened on each device you want to connect.
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Drag & Drop Overlay -->
+  <div id="globalDropOverlay" class="fixed inset-0 z-40 bg-white/90 dark:bg-slate-950/90 backdrop-blur-sm hidden flex-col items-center justify-center p-6 pointer-events-none">
+    <div class="w-full max-w-md border-2 border-dashed border-slate-900 dark:border-slate-100 rounded-2xl p-8 flex flex-col items-center text-center bg-slate-50 dark:bg-slate-900 shadow-lg">
+      <div class="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 flex items-center justify-center mb-3">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-1">Drop to Share</h2>
+      <p class="text-slate-500 dark:text-slate-400 text-xs">Release files, images, videos, or text to send to this room.</p>
+    </div>
+  </div>
+
+  <!-- Top Header -->
+  <header class="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+          </svg>
+        </div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-base font-semibold text-slate-900 dark:text-white">Clipboard</h1>
+          <span id="myDeviceBadge" class="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Device</span>
+        </div>
+      </div>
+
+      <!-- Room & Theme Controls -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+          <span id="syncDot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span id="syncStatusText" class="text-slate-700 dark:text-slate-300 font-medium">Not connected</span>
+          <span id="peerCountBadge" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-medium">1 device</span>
+        </div>
+
+        <button
+          id="changeRoomBtn"
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium border border-slate-300 dark:border-slate-700 transition"
+          title="Change Room Code"
+        >
+          <span class="text-slate-500 dark:text-slate-400">Room:</span>
+          <span id="activeRoomLabel" class="font-mono-code font-semibold text-slate-900 dark:text-white">—</span>
+          <span class="text-slate-400 dark:text-slate-500 underline ml-1">Change</span>
+        </button>
+
+        <button
+          id="openQrModalBtn"
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 text-xs font-medium transition"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path>
+          </svg>
+          <span>QR / Connect</span>
+        </button>
+
+        <!-- Theme Toggle Button -->
+        <button
+          id="themeToggleBtn"
+          type="button"
+          class="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
+          title="Toggle light/dark theme"
+        >
+          <!-- Sun Icon (shown in dark mode) -->
+          <svg id="sunIcon" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+          </svg>
+          <!-- Moon Icon (shown in light mode) -->
+          <svg id="moonIcon" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Column: Input & Upload (5 cols) -->
+    <section class="lg:col-span-5 flex flex-col gap-4">
+
+      <!-- Paste / Drop Card -->
+      <div
+        id="dropZoneCard"
+        class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 flex flex-col gap-4 shadow-sm transition"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-900 dark:text-white">Share to Clipboard</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Press <kbd class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono-code text-[11px]">Ctrl+V</kbd> / <kbd class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono-code text-[11px]">⌘V</kbd> anywhere or drop files</p>
+          </div>
+
+          <button
+            id="readSystemClipboardBtn"
+            type="button"
+            class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-medium text-xs border border-slate-200 dark:border-slate-700 transition shrink-0"
+          >
+            Paste Clipboard
+          </button>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <textarea
+            id="clipTextInput"
+            rows="4"
+            placeholder="Type or paste text, links, or code here..."
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:border-slate-900 dark:focus:border-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none p-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 resize-y font-mono-code"
+          ></textarea>
+
+          <div class="flex items-center justify-between gap-2">
+            <span id="charCounter" class="text-xs text-slate-400">0 characters</span>
+            <div class="flex items-center gap-2">
+              <button
+                id="clearInputBtn"
+                type="button"
+                class="px-2.5 py-1.5 rounded-lg text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                Clear
+              </button>
+              <button
+                id="shareTextBtn"
+                type="button"
+                class="px-4 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition"
+              >
+                Share Text
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- File / Media Attachment -->
+        <div class="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+          <span class="text-xs text-slate-500 dark:text-slate-400">Images, videos, audio, or any file</span>
+          <div>
+            <input id="filePickerInput" type="file" multiple class="hidden" />
+            <button
+              id="triggerFilePickerBtn"
+              type="button"
+              class="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition flex items-center gap-1.5"
+            >
+              <svg class="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+              </svg>
+              <span>Choose Files</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Transfer Progress Bar -->
+        <div id="transferProgressBox" class="hidden flex-col gap-1.5 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div class="flex items-center justify-between text-xs">
+            <span id="transferProgressLabel" class="text-slate-700 dark:text-slate-300 font-medium">Sending file...</span>
+            <span id="transferProgressPct" class="text-slate-500 font-mono-code">0%</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div id="transferProgressBar" class="h-full bg-slate-900 dark:bg-slate-100 transition-all duration-150" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Latest Item Card -->
+      <div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 flex flex-col gap-3 shadow-sm">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Latest Shared Item</h3>
+          <span id="latestClipTimestamp" class="text-xs text-slate-400 dark:text-slate-500">No items yet</span>
+        </div>
+        <div id="latestClipContainer" class="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 min-h-[96px] flex flex-col justify-center">
+          <p class="text-xs text-slate-400 text-center">The most recent item shared in this room will appear here.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Column: Clipboard History (7 cols) -->
+    <section class="lg:col-span-7 flex flex-col gap-4">
+
+      <div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-3 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm font-semibold text-slate-900 dark:text-white">Clipboard History</h2>
+            <span id="historyCountBadge" class="px-2 py-0.5 text-xs font-medium rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">0 items</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none bg-slate-50 dark:bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
+              <input id="autoCopyToggle" type="checkbox" class="rounded border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-0 bg-transparent" />
+              <span>Auto-copy incoming</span>
+            </label>
+
+            <button
+              id="clearHistoryBtn"
+              type="button"
+              class="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 border border-slate-200 dark:border-slate-700 hover:border-red-200 dark:hover:border-red-900 text-xs font-medium transition"
+            >
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters & Search -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div id="filterTabsContainer" class="flex flex-wrap items-center gap-1">
+            <button type="button" data-filter="all" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 transition">All</button>
+            <button type="button" data-filter="text" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition">Text</button>
+            <button type="button" data-filter="link" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition">Links</button>
+            <button type="button" data-filter="image" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition">Images</button>
+            <button type="button" data-filter="video" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition">Media</button>
+            <button type="button" data-filter="file" class="filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition">Files</button>
+          </div>
+
+          <div class="relative flex-1 min-w-[160px] max-w-xs">
+            <input
+              id="searchHistoryInput"
+              type="text"
+              placeholder="Search history..."
+              class="w-full rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:border-slate-900 dark:focus:border-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none px-3 py-1 text-xs text-slate-900 dark:text-white placeholder-slate-400"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- History List -->
+      <div id="historyFeedList" class="flex flex-col gap-3"></div>
+
+    </section>
+  </main>
+
+  <!-- QR / Connect Modal -->
+  <div id="qrModal" class="fixed inset-0 z-40 bg-slate-900/50 dark:bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 flex flex-col gap-4 shadow-xl max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-semibold text-slate-900 dark:text-white">Connect Another Device</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Sync across Wi-Fi or different networks</p>
+        </div>
+        <button id="closeQrModalBtn" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Important Instruction Banner about sharing the HTML file -->
+      <div class="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-3.5 text-xs text-amber-900 dark:text-amber-200 flex flex-col gap-2">
+        <div class="font-semibold flex items-center gap-1.5 text-amber-950 dark:text-amber-100">
+          <svg class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span>Important: Share this HTML file to your other device first!</span>
+        </div>
+        <ol class="list-decimal list-inside space-y-1 text-amber-800 dark:text-amber-300 leading-relaxed">
+          <li>Because this is a standalone <span class="font-mono-code font-medium">.html</span> file (not a hosted server), you <strong>must also send/save a copy of <span class="font-mono-code">shared_clipboard.html</span></strong> onto the phone or computer you want to connect.</li>
+          <li>Open <span class="font-mono-code">shared_clipboard.html</span> in the browser on that device.</li>
+          <li>Enter the exact same Room Code shown below.</li>
+        </ol>
+        <div class="pt-1">
+          <button
+            id="downloadHtmlCopyBtn"
+            type="button"
+            class="w-full py-2 px-3 rounded-lg bg-white dark:bg-slate-900 hover:bg-amber-100/60 dark:hover:bg-amber-900/40 text-amber-950 dark:text-amber-100 border border-amber-300 dark:border-amber-800 font-medium text-xs transition flex items-center justify-center gap-1.5 shadow-2xs"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+            <span>Download a Copy of shared_clipboard.html to Send</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- QR Code & Room Code Display -->
+      <div class="flex flex-col items-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 gap-3">
+        <div id="qrCodeCanvasWrap" class="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-center min-h-[156px] min-w-[156px]"></div>
+        <div class="text-center">
+          <div class="text-[11px] uppercase tracking-wider text-slate-400 font-medium">Current Room Code</div>
+          <div id="modalRoomCodeDisplay" class="text-xl font-bold font-mono-code text-slate-900 dark:text-white tracking-wider mt-0.5">—</div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2">
+        <button id="copyRoomCodeBtn" type="button" class="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">
+          Copy Room Code
+        </button>
+        <button id="doneQrModalBtn" type="button" class="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Lightbox Modal -->
+  <div id="imageLightboxModal" class="fixed inset-0 z-50 bg-slate-900/90 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="relative max-w-4xl w-full flex flex-col items-center gap-3">
+      <button id="closeLightboxBtn" type="button" class="self-end px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-700">
+        Close (Esc)
+      </button>
+      <img id="lightboxImg" src="" alt="Preview" class="max-w-full max-h-[80vh] h-auto rounded-xl border border-slate-700 shadow-2xl object-contain bg-white dark:bg-slate-900" />
+      <div id="lightboxCaption" class="text-xs text-slate-300"></div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none"></div>
+
+  <script>
+    (function () {
+      // --- Theme Management ---
+      const themeToggleBtn = document.getElementById('themeToggleBtn');
+      const htmlEl = document.documentElement;
+
+      function getStoredTheme() {
+        return localStorage.getItem('clipdrop_theme') || 'light';
+      }
+
+      function setTheme(theme) {
+        if (theme === 'dark') {
+          htmlEl.classList.add('dark');
+          localStorage.setItem('clipdrop_theme', 'dark');
+        } else {
+          htmlEl.classList.remove('dark');
+          localStorage.setItem('clipdrop_theme', 'light');
+        }
+      }
+
+      // Initialize theme from storage
+      setTheme(getStoredTheme());
+
+      themeToggleBtn.addEventListener('click', function () {
+        const isDark = htmlEl.classList.contains('dark');
+        setTheme(isDark ? 'light' : 'dark');
+      });
+
+      // --- 1. Device Detection ---
+      function detectDeviceName() {
+        const ua = navigator.userAgent || '';
+        let os = 'Device';
+        if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+        else if (/Android/i.test(ua)) os = 'Android';
+        else if (/Mac/i.test(ua)) os = 'macOS';
+        else if (/Win/i.test(ua)) os = 'Windows';
+        else if (/Linux/i.test(ua)) os = 'Linux';
+
+        let browser = 'Browser';
+        if (/Edg\//i.test(ua)) browser = 'Edge';
+        else if (/Chrome\//i.test(ua) && !/Chromium/i.test(ua)) browser = 'Chrome';
+        else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+        else if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
+
+        return os + ' · ' + browser;
+      }
+
+      const MY_NODE_ID = 'node-' + Math.random().toString(36).substring(2, 8);
+      const MY_DEVICE_NAME = detectDeviceName();
+
+      // --- 2. State (No default room code; always asked on startup/restart) ---
+      const state = {
+        roomCode: '',
+        clips: [],
+        activeFilter: 'all',
+        searchQuery: '',
+        peer: null,
+        isHub: false,
+        connections: new Map(),
+        broadcastChannel: null,
+        incomingChunks: new Map()
+      };
+
+      // --- 3. DOM Elements ---
+      const roomGateModal = document.getElementById('roomGateModal');
+      const roomGateForm = document.getElementById('roomGateForm');
+      const gateRoomInput = document.getElementById('gateRoomInput');
+      const generateRandomRoomBtn = document.getElementById('generateRandomRoomBtn');
+      const gateErrorText = document.getElementById('gateErrorText');
+
+      const myDeviceBadge = document.getElementById('myDeviceBadge');
+      const syncDot = document.getElementById('syncDot');
+      const syncStatusText = document.getElementById('syncStatusText');
+      const peerCountBadge = document.getElementById('peerCountBadge');
+      const changeRoomBtn = document.getElementById('changeRoomBtn');
+      const activeRoomLabel = document.getElementById('activeRoomLabel');
+      const openQrModalBtn = document.getElementById('openQrModalBtn');
+
+      const dropZoneCard = document.getElementById('dropZoneCard');
+      const globalDropOverlay = document.getElementById('globalDropOverlay');
+      const readSystemClipboardBtn = document.getElementById('readSystemClipboardBtn');
+      const clipTextInput = document.getElementById('clipTextInput');
+      const charCounter = document.getElementById('charCounter');
+      const clearInputBtn = document.getElementById('clearInputBtn');
+      const shareTextBtn = document.getElementById('shareTextBtn');
+      const filePickerInput = document.getElementById('filePickerInput');
+      const triggerFilePickerBtn = document.getElementById('triggerFilePickerBtn');
+
+      const transferProgressBox = document.getElementById('transferProgressBox');
+      const transferProgressLabel = document.getElementById('transferProgressLabel');
+      const transferProgressPct = document.getElementById('transferProgressPct');
+      const transferProgressBar = document.getElementById('transferProgressBar');
+
+      const latestClipTimestamp = document.getElementById('latestClipTimestamp');
+      const latestClipContainer = document.getElementById('latestClipContainer');
+
+      const historyCountBadge = document.getElementById('historyCountBadge');
+      const autoCopyToggle = document.getElementById('autoCopyToggle');
+      const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+      const filterTabsContainer = document.getElementById('filterTabsContainer');
+      const searchHistoryInput = document.getElementById('searchHistoryInput');
+      const historyFeedList = document.getElementById('historyFeedList');
+
+      const qrModal = document.getElementById('qrModal');
+      const closeQrModalBtn = document.getElementById('closeQrModalBtn');
+      const doneQrModalBtn = document.getElementById('doneQrModalBtn');
+      const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
+      const downloadHtmlCopyBtn = document.getElementById('downloadHtmlCopyBtn');
+      const qrCodeCanvasWrap = document.getElementById('qrCodeCanvasWrap');
+      const modalRoomCodeDisplay = document.getElementById('modalRoomCodeDisplay');
+
+      const imageLightboxModal = document.getElementById('imageLightboxModal');
+      const closeLightboxBtn = document.getElementById('closeLightboxBtn');
+      const lightboxImg = document.getElementById('lightboxImg');
+      const lightboxCaption = document.getElementById('lightboxCaption');
+
+      myDeviceBadge.textContent = MY_DEVICE_NAME;
+
+      // --- 4. Helper Functions ---
+      function showToast(message) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = 'pointer-events-auto px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-lg text-xs font-medium flex items-center justify-between gap-2 transition-opacity duration-200';
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(function () {
+          toast.style.opacity = '0';
+          setTimeout(function () {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+          }, 200);
+        }, 2500);
+      }
+
+      function escapeHtml(str) {
+        return String(str || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function formatBytes(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+      }
+
+      function formatTime(ts) {
+        const d = new Date(ts);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      }
+
+      function isLikelyUrl(text) {
+        const trimmed = (text || '').trim();
+        if (!trimmed || /\s/.test(trimmed)) return false;
+        return /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(trimmed);
+      }
+
+      function copyTextReliable(text, label) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            showToast(label || 'Copied to clipboard');
+          }).catch(function () {
+            fallbackCopyText(text, label);
+          });
+        } else {
+          fallbackCopyText(text, label);
+        }
+      }
+
+      function fallbackCopyText(text, label) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+          document.execCommand('copy');
+          showToast(label || 'Copied to clipboard');
+        } catch (err) {
+          showToast('Press Ctrl+C / Cmd+C to copy');
+        }
+        document.body.removeChild(ta);
+      }
+
+      function classifyFileKind(mimeType, fileName) {
+        const mime = (mimeType || '').toLowerCase();
+        const name = (fileName || '').toLowerCase();
+        if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/.test(name)) return 'image';
+        if (mime.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi|m4v)$/.test(name)) return 'video';
+        if (mime.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/.test(name)) return 'video';
+        return 'file';
+      }
+
+      function sanitizeRoomCode(raw) {
+        return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24);
+      }
+
+      function generateRandomRoomCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let part1 = '';
+        let part2 = '';
+        for (let i = 0; i < 4; i++) {
+          part1 += chars.charAt(Math.floor(Math.random() * chars.length));
+          part2 += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return part1 + '-' + part2;
+      }
+
+      // --- 5. Room Sync Engine (BroadcastChannel + WebRTC PeerJS) ---
+      function getHubPeerId(roomCode) {
+        return 'clipdrop-room-v2-' + roomCode.toLowerCase() + '-hub';
+      }
+
+      function updateSyncUi(statusText, dotColorClass) {
+        syncStatusText.textContent = statusText;
+        syncDot.className = 'w-2 h-2 rounded-full ' + dotColorClass;
+        const count = 1 + state.connections.size;
+        peerCountBadge.textContent = count + (count === 1 ? ' device' : ' devices');
+      }
+
+      function initRoomSync(rawCode) {
+        const room = sanitizeRoomCode(rawCode);
+        if (!room) return;
+
+        state.roomCode = room;
+        activeRoomLabel.textContent = room;
+        modalRoomCodeDisplay.textContent = room;
+
+        // Same-browser tab sync
+        if (state.broadcastChannel) {
+          try { state.broadcastChannel.close(); } catch (e) {}
+        }
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            state.broadcastChannel = new BroadcastChannel('clipdrop_room_' + room);
+            state.broadcastChannel.onmessage = function (ev) {
+              handleIncomingProtocolMessage(ev.data, null);
+            };
+          } catch (e) {}
+        }
+
+        // Reset existing WebRTC connections
+        state.connections.forEach(function (conn) {
+          try { conn.close(); } catch (e) {}
+        });
+        state.connections.clear();
+        if (state.peer) {
+          try { state.peer.destroy(); } catch (e) {}
+          state.peer = null;
+        }
+
+        if (typeof Peer === 'undefined') {
+          updateSyncUi('Local Tab Sync', 'bg-emerald-500');
+          return;
+        }
+
+        updateSyncUi('Connecting...', 'bg-amber-500 animate-pulse');
+        const hubId = getHubPeerId(room);
+
+        try {
+          const candidateHub = new Peer(hubId, { debug: 0 });
+          state.peer = candidateHub;
+
+          candidateHub.on('open', function () {
+            state.isHub = true;
+            updateSyncUi('Ready', 'bg-emerald-500');
+          });
+
+          candidateHub.on('connection', function (conn) {
+            registerPeerConnection(conn);
+          });
+
+          candidateHub.on('error', function (err) {
+            if (err && err.type === 'unavailable-id') {
+              try { candidateHub.destroy(); } catch (e) {}
+              connectAsSpokeClient(room, hubId);
+            } else {
+              updateSyncUi('Ready', 'bg-emerald-500');
+            }
+          });
+        } catch (e) {
+          updateSyncUi('Local Ready', 'bg-emerald-500');
+        }
+      }
+
+      function connectAsSpokeClient(room, hubId) {
+        state.isHub = false;
+        try {
+          const spokePeer = new Peer({ debug: 0 });
+          state.peer = spokePeer;
+
+          spokePeer.on('open', function () {
+            const conn = spokePeer.connect(hubId, { reliable: true });
+            registerPeerConnection(conn);
+          });
+
+          spokePeer.on('connection', function (conn) {
+            registerPeerConnection(conn);
+          });
+
+          spokePeer.on('error', function () {
+            updateSyncUi('Ready', 'bg-emerald-500');
+          });
+        } catch (e) {
+          updateSyncUi('Ready', 'bg-emerald-500');
+        }
+      }
+
+      function registerPeerConnection(conn) {
+        conn.on('open', function () {
+          state.connections.set(conn.peer, conn);
+          updateSyncUi('Connected', 'bg-emerald-500');
+          showToast('Device connected to room ' + state.roomCode);
+
+          if (state.clips.length > 0) {
+            sendHistorySnapshotToPeer(conn);
+          }
+        });
+
+        conn.on('data', function (data) {
+          handleIncomingProtocolMessage(data, conn);
+        });
+
+        conn.on('close', function () {
+          state.connections.delete(conn.peer);
+          updateSyncUi(state.connections.size > 0 ? 'Connected' : 'Ready', 'bg-emerald-500');
+        });
+
+        conn.on('error', function () {
+          state.connections.delete(conn.peer);
+          updateSyncUi(state.connections.size > 0 ? 'Connected' : 'Ready', 'bg-emerald-500');
+        });
+      }
+
+      const CHUNK_SIZE = 48 * 1024;
+
+      function broadcastProtocolMessage(msg, excludeConn) {
+        if (state.broadcastChannel) {
+          try { state.broadcastChannel.postMessage(msg); } catch (e) {}
+        }
+        state.connections.forEach(function (conn) {
+          if (excludeConn && conn.peer === excludeConn.peer) return;
+          if (conn && conn.open) {
+            try { conn.send(msg); } catch (e) {}
+          }
+        });
+      }
+
+      function broadcastClipItem(clip, excludeConn) {
+        const payloadStr = clip.dataUrl || clip.content || '';
+        if (payloadStr.length <= CHUNK_SIZE) {
+          broadcastProtocolMessage({
+            type: 'CLIP_FULL',
+            senderNode: MY_NODE_ID,
+            clip: clip
+          }, excludeConn);
+        } else {
+          const totalChunks = Math.ceil(payloadStr.length / CHUNK_SIZE);
+          const transferId = clip.id + '-' + Math.random().toString(36).slice(2, 6);
+          const metaCopy = Object.assign({}, clip, { dataUrl: '', content: '' });
+
+          broadcastProtocolMessage({
+            type: 'CLIP_START',
+            senderNode: MY_NODE_ID,
+            transferId: transferId,
+            totalChunks: totalChunks,
+            meta: metaCopy
+          }, excludeConn);
+
+          for (let i = 0; i < totalChunks; i++) {
+            const slice = payloadStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            broadcastProtocolMessage({
+              type: 'CLIP_CHUNK',
+              senderNode: MY_NODE_ID,
+              transferId: transferId,
+              index: i,
+              totalChunks: totalChunks,
+              chunk: slice
+            }, excludeConn);
+          }
+        }
+      }
+
+      function sendHistorySnapshotToPeer(conn) {
+        const ordered = state.clips.slice().reverse();
+        ordered.forEach(function (clip) {
+          const payloadStr = clip.dataUrl || clip.content || '';
+          if (payloadStr.length <= CHUNK_SIZE && conn.open) {
+            try {
+              conn.send({
+                type: 'CLIP_FULL',
+                senderNode: MY_NODE_ID,
+                clip: clip,
+                silent: true
+              });
+            } catch (e) {}
+          }
+        });
+      }
+
+      function handleIncomingProtocolMessage(msg, sourceConn) {
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.senderNode === MY_NODE_ID) return;
+
+        if (state.isHub && sourceConn) {
+          broadcastProtocolMessage(msg, sourceConn);
+        }
+
+        if (msg.type === 'CLIP_FULL' && msg.clip) {
+          ingestIncomingClip(msg.clip, Boolean(msg.silent));
+        } else if (msg.type === 'CLIP_START') {
+          state.incomingChunks.set(msg.transferId, {
+            meta: msg.meta,
+            totalChunks: msg.totalChunks,
+            chunks: new Array(msg.totalChunks),
+            received: 0
+          });
+          showTransferProgress('Receiving ' + (msg.meta.fileName || msg.meta.kind) + '...', 5);
+        } else if (msg.type === 'CLIP_CHUNK') {
+          const entry = state.incomingChunks.get(msg.transferId);
+          if (!entry) return;
+          if (typeof entry.chunks[msg.index] === 'undefined') {
+            entry.chunks[msg.index] = msg.chunk;
+            entry.received += 1;
+          }
+          const pct = Math.min(99, Math.round((entry.received / entry.totalChunks) * 100));
+          showTransferProgress('Receiving ' + (entry.meta.fileName || 'file') + '...', pct);
+
+          if (entry.received >= entry.totalChunks) {
+            const fullData = entry.chunks.join('');
+            state.incomingChunks.delete(msg.transferId);
+            hideTransferProgress();
+            const finalClip = Object.assign({}, entry.meta);
+            if (finalClip.kind === 'text' || finalClip.kind === 'link') {
+              finalClip.content = fullData;
+            } else {
+              finalClip.dataUrl = fullData;
+            }
+            ingestIncomingClip(finalClip, false);
+          }
+        } else if (msg.type === 'CLIP_DELETE' && msg.clipId) {
+          state.clips = state.clips.filter(function (c) { return c.id !== msg.clipId; });
+          renderAll();
+        } else if (msg.type === 'CLIP_CLEAR') {
+          state.clips = [];
+          renderAll();
+          showToast('Clipboard history cleared');
+        }
+      }
+
+      function ingestIncomingClip(clip, silent) {
+        if (!clip || !clip.id) return;
+        const exists = state.clips.some(function (c) { return c.id === clip.id; });
+        if (exists) return;
+
+        state.clips.unshift(clip);
+        renderAll();
+
+        if (!silent) {
+          showToast('Received ' + clip.kind + ' from ' + (clip.device || 'Device'));
+          if (autoCopyToggle.checked && (clip.kind === 'text' || clip.kind === 'link') && clip.content) {
+            copyTextReliable(clip.content, 'Auto-copied incoming text');
+          }
+        }
+      }
+
+      function showTransferProgress(label, pct) {
+        transferProgressBox.classList.remove('hidden');
+        transferProgressBox.classList.add('flex');
+        transferProgressLabel.textContent = label;
+        transferProgressPct.textContent = pct + '%';
+        transferProgressBar.style.width = pct + '%';
+      }
+
+      function hideTransferProgress() {
+        setTimeout(function () {
+          transferProgressBox.classList.add('hidden');
+          transferProgressBox.classList.remove('flex');
+          transferProgressBar.style.width = '0%';
+        }, 300);
+      }
+
+      // --- 6. Creating & Sharing Clips ---
+      function requireActiveRoom() {
+        if (!state.roomCode) {
+          openRoomGateModal();
+          return false;
+        }
+        return true;
+      }
+
+      function addTextOrLinkClip(rawText) {
+        if (!requireActiveRoom()) return;
+        const text = String(rawText || '');
+        if (!text.trim()) {
+          showToast('Paste or type something first');
+          return;
+        }
+        const kind = isLikelyUrl(text) ? 'link' : 'text';
+        const clip = {
+          id: 'clip-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+          kind: kind,
+          content: text,
+          fileName: kind === 'link' ? text.trim() : 'Text Snippet',
+          mimeType: 'text/plain',
+          size: new Blob([text]).size,
+          device: MY_DEVICE_NAME,
+          timestamp: Date.now()
+        };
+
+        state.clips.unshift(clip);
+        renderAll();
+        broadcastClipItem(clip, null);
+        showToast('Shared ' + kind);
+      }
+
+      function handleFilesSelection(fileList) {
+        if (!requireActiveRoom()) return;
+        if (!fileList || fileList.length === 0) return;
+
+        Array.from(fileList).forEach(function (file) {
+          showTransferProgress('Reading ' + file.name + '...', 20);
+          const reader = new FileReader();
+          reader.onprogress = function (ev) {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 90);
+              showTransferProgress('Reading ' + file.name + '...', pct);
+            }
+          };
+          reader.onload = function (ev) {
+            showTransferProgress('Sharing ' + file.name + '...', 100);
+            const dataUrl = ev.target.result;
+            const kind = classifyFileKind(file.type, file.name);
+            const clip = {
+              id: 'clip-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+              kind: kind,
+              content: '',
+              dataUrl: dataUrl,
+              fileName: file.name || ('Clipboard_' + kind + '_' + Date.now()),
+              mimeType: file.type || 'application/octet-stream',
+              size: file.size || 0,
+              device: MY_DEVICE_NAME,
+              timestamp: Date.now()
+            };
+            state.clips.unshift(clip);
+            renderAll();
+            broadcastClipItem(clip, null);
+            hideTransferProgress();
+            showToast('Shared ' + clip.fileName);
+          };
+          reader.onerror = function () {
+            hideTransferProgress();
+            showToast('Could not read ' + file.name);
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      // --- 7. Rendering UI ---
+      function getKindBadgeHtml(kind) {
+        const label = kind === 'video' ? 'Media' : kind;
+        return '<span class="px-2 py-0.5 rounded text-[11px] font-semibold uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">' + escapeHtml(label) + '</span>';
+      }
+
+      function renderLatestClip() {
+        if (state.clips.length === 0) {
+          latestClipTimestamp.textContent = 'No items yet';
+          latestClipContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">The most recent item shared in this room will appear here.</p>';
+          return;
+        }
+
+        const latest = state.clips[0];
+        latestClipTimestamp.textContent = formatTime(latest.timestamp) + ' · ' + latest.device;
+
+        let html = '';
+        if (latest.kind === 'text') {
+          html =
+            '<pre class="text-xs text-slate-800 dark:text-slate-200 font-mono-code whitespace-pre-wrap break-words max-h-32 overflow-y-auto mb-3">' +
+              escapeHtml(latest.content) +
+            '</pre>' +
+            '<div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">' +
+              '<span class="text-xs text-slate-400">' + formatBytes(latest.size) + '</span>' +
+              '<button type="button" data-action="copy-clip" data-id="' + latest.id + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy Text</button>' +
+            '</div>';
+        } else if (latest.kind === 'link') {
+          html =
+            '<a href="' + escapeHtml(latest.content.trim()) + '" target="_blank" rel="noopener noreferrer" class="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline break-all mb-3 block">' +
+              escapeHtml(latest.content.trim()) +
+            '</a>' +
+            '<div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">' +
+              '<button type="button" data-action="copy-clip" data-id="' + latest.id + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy Link</button>' +
+              '<a href="' + escapeHtml(latest.content.trim()) + '" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition">Open ↗</a>' +
+            '</div>';
+        } else if (latest.kind === 'image') {
+          html =
+            '<div class="flex flex-col gap-2.5">' +
+              '<img src="' + latest.dataUrl + '" alt="' + escapeHtml(latest.fileName) + '" data-action="lightbox" data-id="' + latest.id + '" class="max-h-40 w-auto mx-auto rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer object-contain bg-white dark:bg-slate-900" />' +
+              '<div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">' +
+                '<span class="text-xs text-slate-500 dark:text-slate-400 truncate">' + escapeHtml(latest.fileName) + '</span>' +
+                '<div class="flex items-center gap-1.5 shrink-0">' +
+                  '<button type="button" data-action="copy-image" data-id="' + latest.id + '" class="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy</button>' +
+                  '<a href="' + latest.dataUrl + '" download="' + escapeHtml(latest.fileName) + '" class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition">Download</a>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+        } else if (latest.kind === 'video') {
+          const isAudio = (latest.mimeType || '').startsWith('audio/');
+          const mediaTag = isAudio
+            ? '<audio controls src="' + latest.dataUrl + '" class="w-full"></audio>'
+            : '<video controls preload="metadata" src="' + latest.dataUrl + '" class="max-h-44 w-full rounded-lg bg-black"></video>';
+          html =
+            '<div class="flex flex-col gap-2.5">' +
+              mediaTag +
+              '<div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">' +
+                '<span class="text-xs text-slate-500 dark:text-slate-400 truncate">' + escapeHtml(latest.fileName) + '</span>' +
+                '<a href="' + latest.dataUrl + '" download="' + escapeHtml(latest.fileName) + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition shrink-0">Download</a>' +
+              '</div>' +
+            '</div>';
+        } else {
+          html =
+            '<div class="flex items-center justify-between gap-3">' +
+              '<div class="min-w-0">' +
+                '<div class="text-xs font-semibold text-slate-900 dark:text-white truncate">' + escapeHtml(latest.fileName) + '</div>' +
+                '<div class="text-[11px] text-slate-500 dark:text-slate-400">' + formatBytes(latest.size) + '</div>' +
+              '</div>' +
+              '<a href="' + latest.dataUrl + '" download="' + escapeHtml(latest.fileName) + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition shrink-0">Download</a>' +
+            '</div>';
+        }
+
+        latestClipContainer.innerHTML = html;
+      }
+
+      function renderHistory() {
+        historyCountBadge.textContent = state.clips.length + (state.clips.length === 1 ? ' item' : ' items');
+
+        const query = state.searchQuery.trim().toLowerCase();
+        const filtered = state.clips.filter(function (clip) {
+          if (state.activeFilter !== 'all' && clip.kind !== state.activeFilter) return false;
+          if (!query) return true;
+          const hay = ((clip.content || '') + ' ' + (clip.fileName || '') + ' ' + (clip.device || '')).toLowerCase();
+          return hay.includes(query);
+        });
+
+        if (filtered.length === 0) {
+          historyFeedList.innerHTML =
+            '<div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-10 text-center flex flex-col items-center gap-1.5">' +
+              '<p class="text-sm font-medium text-slate-700 dark:text-slate-300">No clipboard items yet</p>' +
+              '<p class="text-xs text-slate-400 max-w-sm">Paste text, links, screenshots, videos, or drop files on the left to share them across your room.</p>' +
+            '</div>';
+          return;
+        }
+
+        historyFeedList.innerHTML = filtered.map(function (clip) {
+          let previewHtml = '';
+          let actionsHtml = '';
+
+          if (clip.kind === 'text') {
+            previewHtml =
+              '<pre class="text-xs sm:text-sm text-slate-800 dark:text-slate-200 font-mono-code bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">' +
+                escapeHtml(clip.content) +
+              '</pre>';
+            actionsHtml =
+              '<button type="button" data-action="copy-clip" data-id="' + clip.id + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy</button>' +
+              '<button type="button" data-action="download-text" data-id="' + clip.id + '" class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition">.txt</button>';
+          } else if (clip.kind === 'link') {
+            previewHtml =
+              '<div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">' +
+                '<a href="' + escapeHtml(clip.content.trim()) + '" target="_blank" rel="noopener noreferrer" class="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline break-all">' +
+                  escapeHtml(clip.content.trim()) +
+                '</a>' +
+              '</div>';
+            actionsHtml =
+              '<button type="button" data-action="copy-clip" data-id="' + clip.id + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy Link</button>' +
+              '<a href="' + escapeHtml(clip.content.trim()) + '" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition">Open ↗</a>';
+          } else if (clip.kind === 'image') {
+            previewHtml =
+              '<div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col items-center gap-2">' +
+                '<img src="' + clip.dataUrl + '" alt="' + escapeHtml(clip.fileName) + '" data-action="lightbox" data-id="' + clip.id + '" class="max-h-56 max-w-full h-auto rounded-lg cursor-pointer object-contain bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />' +
+                '<span class="text-[11px] text-slate-500 dark:text-slate-400">' + escapeHtml(clip.fileName) + ' · ' + formatBytes(clip.size) + '</span>' +
+              '</div>';
+            actionsHtml =
+              '<button type="button" data-action="copy-image" data-id="' + clip.id + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Copy Image</button>' +
+              '<a href="' + clip.dataUrl + '" download="' + escapeHtml(clip.fileName) + '" class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium transition">Download</a>';
+          } else if (clip.kind === 'video') {
+            const isAudio = (clip.mimeType || '').startsWith('audio/');
+            const playerHtml = isAudio
+              ? '<audio controls src="' + clip.dataUrl + '" class="w-full"></audio>'
+              : '<video controls preload="metadata" src="' + clip.dataUrl + '" class="max-h-60 max-w-full rounded-lg bg-black mx-auto"></video>';
+            previewHtml =
+              '<div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col gap-2">' +
+                playerHtml +
+                '<span class="text-[11px] text-slate-500 dark:text-slate-400">' + escapeHtml(clip.fileName) + ' · ' + formatBytes(clip.size) + '</span>' +
+              '</div>';
+            actionsHtml =
+              '<a href="' + clip.dataUrl + '" download="' + escapeHtml(clip.fileName) + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Download</a>';
+          } else {
+            previewHtml =
+              '<div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex items-center justify-between gap-3">' +
+                '<div class="min-w-0">' +
+                  '<div class="text-sm font-medium text-slate-900 dark:text-white truncate">' + escapeHtml(clip.fileName) + '</div>' +
+                  '<div class="text-xs text-slate-500 dark:text-slate-400">' + escapeHtml(clip.mimeType || 'File') + ' · ' + formatBytes(clip.size) + '</div>' +
+                '</div>' +
+              '</div>';
+            actionsHtml =
+              '<a href="' + clip.dataUrl + '" download="' + escapeHtml(clip.fileName) + '" class="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-medium text-xs transition">Download</a>';
+          }
+
+          return (
+            '<article class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-3 shadow-xs">' +
+              '<div class="flex flex-wrap items-center justify-between gap-2">' +
+                '<div class="flex items-center gap-2">' +
+                  getKindBadgeHtml(clip.kind) +
+                  '<span class="text-xs font-medium text-slate-700 dark:text-slate-300">' + escapeHtml(clip.device || 'Device') + '</span>' +
+                  '<span class="text-xs text-slate-400">· ' + formatTime(clip.timestamp) + '</span>' +
+                '</div>' +
+                '<div class="flex items-center gap-1.5">' +
+                  actionsHtml +
+                  '<button type="button" data-action="delete-clip" data-id="' + clip.id + '" class="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition" title="Delete">' +
+                    '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                      '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>' +
+                    '</svg>' +
+                  '</button>' +
+                '</div>' +
+              '</div>' +
+              previewHtml +
+            '</article>'
+          );
+        }).join('');
+      }
+
+      function renderAll() {
+        renderLatestClip();
+        renderHistory();
+      }
+
+      // --- 8. Event Listeners & Actions ---
+      async function copyImageDataUrlToClipboard(dataUrl) {
+        try {
+          if (navigator.clipboard && window.ClipboardItem) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            await new Promise(function (resolve, reject) {
+              img.onload = resolve;
+              img.onerror = reject;
+              img.src = dataUrl;
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const blob = await new Promise(function (resolve) { canvas.toBlob(resolve, 'image/png'); });
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            showToast('Image copied to clipboard');
+            return;
+          }
+        } catch (err) {}
+        copyTextReliable(dataUrl, 'Copied image data URL');
+      }
+
+      function handleClipActionClick(e) {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        const action = target.getAttribute('data-action');
+        const clipId = target.getAttribute('data-id');
+        const clip = state.clips.find(function (c) { return c.id === clipId; });
+        if (!clip) return;
+
+        if (action === 'copy-clip') {
+          copyTextReliable(clip.content, 'Copied to clipboard');
+        } else if (action === 'copy-image') {
+          copyImageDataUrlToClipboard(clip.dataUrl);
+        } else if (action === 'download-text') {
+          const blob = new Blob([clip.content || ''], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'clipboard-' + clip.id.slice(-5) + '.txt';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        } else if (action === 'delete-clip') {
+          state.clips = state.clips.filter(function (c) { return c.id !== clipId; });
+          renderAll();
+          broadcastProtocolMessage({
+            type: 'CLIP_DELETE',
+            senderNode: MY_NODE_ID,
+            clipId: clipId
+          }, null);
+        } else if (action === 'lightbox') {
+          lightboxImg.src = clip.dataUrl;
+          lightboxCaption.textContent = clip.fileName + ' · ' + formatBytes(clip.size);
+          imageLightboxModal.classList.remove('hidden');
+          imageLightboxModal.classList.add('flex');
+        }
+      }
+
+      latestClipContainer.addEventListener('click', handleClipActionClick);
+      historyFeedList.addEventListener('click', handleClipActionClick);
+
+      // Global Paste
+      window.addEventListener('paste', function (e) {
+        if (!state.roomCode) return;
+        if (document.activeElement === searchHistoryInput || document.activeElement === gateRoomInput) return;
+
+        const cd = e.clipboardData || window.clipboardData;
+        if (!cd) return;
+
+        if (cd.files && cd.files.length > 0) {
+          e.preventDefault();
+          handleFilesSelection(cd.files);
+          return;
+        }
+
+        if (cd.items && cd.items.length > 0) {
+          const mediaFiles = [];
+          for (let i = 0; i < cd.items.length; i++) {
+            const item = cd.items[i];
+            if (item.kind === 'file') {
+              const f = item.getAsFile();
+              if (f) mediaFiles.push(f);
+            }
+          }
+          if (mediaFiles.length > 0) {
+            e.preventDefault();
+            handleFilesSelection(mediaFiles);
+            return;
+          }
+        }
+
+        const pastedText = cd.getData('text/plain');
+        if (pastedText) {
+          if (document.activeElement !== clipTextInput) {
+            e.preventDefault();
+            addTextOrLinkClip(pastedText);
+          } else {
+            setTimeout(function () {
+              charCounter.textContent = clipTextInput.value.length + ' characters';
+            }, 20);
+          }
+        }
+      });
+
+      readSystemClipboardBtn.addEventListener('click', async function () {
+        if (!requireActiveRoom()) return;
+        if (navigator.clipboard && navigator.clipboard.read) {
+          try {
+            const items = await navigator.clipboard.read();
+            for (const item of items) {
+              const imageType = item.types.find(function (t) { return t.startsWith('image/'); });
+              if (imageType) {
+                const blob = await item.getType(imageType);
+                const ext = imageType.split('/')[1] || 'png';
+                const file = new File([blob], 'clipboard-image-' + Date.now() + '.' + ext, { type: imageType });
+                handleFilesSelection([file]);
+                return;
+              }
+              if (item.types.includes('text/plain')) {
+                const blob = await item.getType('text/plain');
+                const text = await blob.text();
+                if (text && text.trim()) {
+                  addTextOrLinkClip(text);
+                  return;
+                }
+              }
+            }
+          } catch (err) {}
+        }
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text && text.trim()) {
+              addTextOrLinkClip(text);
+              return;
+            }
+          } catch (err) {}
+        }
+        clipTextInput.focus();
+        showToast('Press Ctrl+V / Cmd+V to paste');
+      });
+
+      // Global Drag & Drop
+      let dragDepth = 0;
+      window.addEventListener('dragenter', function (e) {
+        e.preventDefault();
+        if (!state.roomCode) return;
+        dragDepth += 1;
+        globalDropOverlay.classList.remove('hidden');
+        globalDropOverlay.classList.add('flex');
+        dropZoneCard.classList.add('drop-active');
+      });
+
+      window.addEventListener('dragover', function (e) {
+        e.preventDefault();
+      });
+
+      window.addEventListener('dragleave', function (e) {
+        e.preventDefault();
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+          globalDropOverlay.classList.add('hidden');
+          globalDropOverlay.classList.remove('flex');
+          dropZoneCard.classList.remove('drop-active');
+        }
+      });
+
+      window.addEventListener('drop', function (e) {
+        e.preventDefault();
+        dragDepth = 0;
+        globalDropOverlay.classList.add('hidden');
+        globalDropOverlay.classList.remove('flex');
+        dropZoneCard.classList.remove('drop-active');
+        if (!state.roomCode) return;
+
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleFilesSelection(e.dataTransfer.files);
+          return;
+        }
+        if (e.dataTransfer) {
+          const text = e.dataTransfer.getData('text/plain');
+          if (text && text.trim()) {
+            addTextOrLinkClip(text);
+          }
+        }
+      });
+
+      // Input Box & Filter Controls
+      clipTextInput.addEventListener('input', function () {
+        charCounter.textContent = clipTextInput.value.length + ' characters';
+      });
+
+      clipTextInput.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          shareTextBtn.click();
+        }
+      });
+
+      clearInputBtn.addEventListener('click', function () {
+        clipTextInput.value = '';
+        charCounter.textContent = '0 characters';
+        clipTextInput.focus();
+      });
+
+      shareTextBtn.addEventListener('click', function () {
+        addTextOrLinkClip(clipTextInput.value);
+        clipTextInput.value = '';
+        charCounter.textContent = '0 characters';
+      });
+
+      triggerFilePickerBtn.addEventListener('click', function () {
+        if (!requireActiveRoom()) return;
+        filePickerInput.click();
+      });
+
+      filePickerInput.addEventListener('change', function () {
+        if (filePickerInput.files && filePickerInput.files.length > 0) {
+          handleFilesSelection(filePickerInput.files);
+          filePickerInput.value = '';
+        }
+      });
+
+      clearHistoryBtn.addEventListener('click', function () {
+        state.clips = [];
+        renderAll();
+        broadcastProtocolMessage({
+          type: 'CLIP_CLEAR',
+          senderNode: MY_NODE_ID
+        }, null);
+        showToast('Cleared clipboard history');
+      });
+
+      filterTabsContainer.addEventListener('click', function (e) {
+        const btn = e.target.closest('[data-filter]');
+        if (!btn) return;
+        state.activeFilter = btn.getAttribute('data-filter');
+        Array.from(filterTabsContainer.querySelectorAll('.filter-tab')).forEach(function (el) {
+          if (el.getAttribute('data-filter') === state.activeFilter) {
+            el.className = 'filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 transition';
+          } else {
+            el.className = 'filter-tab px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition';
+          }
+        });
+        renderHistory();
+      });
+
+      searchHistoryInput.addEventListener('input', function () {
+        state.searchQuery = searchHistoryInput.value;
+        renderHistory();
+      });
+
+      // --- 9. Startup Room Gate Modal & QR Modal ---
+      function openRoomGateModal() {
+        gateRoomInput.value = state.roomCode || '';
+        gateErrorText.classList.add('hidden');
+        roomGateModal.classList.remove('hidden');
+        roomGateModal.classList.add('flex');
+        setTimeout(function () { gateRoomInput.focus(); }, 50);
+      }
+
+      generateRandomRoomBtn.addEventListener('click', function () {
+        gateRoomInput.value = generateRandomRoomCode();
+        gateErrorText.classList.add('hidden');
+        gateRoomInput.focus();
+      });
+
+      roomGateForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const cleaned = sanitizeRoomCode(gateRoomInput.value);
+        if (!cleaned) {
+          gateErrorText.classList.remove('hidden');
+          return;
+        }
+        gateErrorText.classList.add('hidden');
+        roomGateModal.classList.add('hidden');
+        roomGateModal.classList.remove('flex');
+        initRoomSync(cleaned);
+      });
+
+      changeRoomBtn.addEventListener('click', function () {
+        openRoomGateModal();
+      });
+
+      function renderQrCode() {
+        qrCodeCanvasWrap.innerHTML = '';
+        modalRoomCodeDisplay.textContent = state.roomCode || '—';
+        const isHttp = /^https?:\/\//i.test(window.location.href);
+        const qrPayload = isHttp
+          ? window.location.href.split('#')[0] + '#room=' + encodeURIComponent(state.roomCode)
+          : state.roomCode;
+
+        if (typeof QRCode !== 'undefined' && qrPayload) {
+          new QRCode(qrCodeCanvasWrap, {
+            text: qrPayload,
+            width: 140,
+            height: 140,
+            colorDark: '#0f172a',
+            colorLight: '#ffffff'
+          });
+        } else {
+          qrCodeCanvasWrap.innerHTML = '<div class="font-mono-code font-bold text-sm text-slate-900 p-4">' + escapeHtml(state.roomCode) + '</div>';
+        }
+      }
+
+      openQrModalBtn.addEventListener('click', function () {
+        if (!requireActiveRoom()) return;
+        renderQrCode();
+        qrModal.classList.remove('hidden');
+        qrModal.classList.add('flex');
+      });
+
+      function closeQrModal() {
+        qrModal.classList.add('hidden');
+        qrModal.classList.remove('flex');
+      }
+
+      closeQrModalBtn.addEventListener('click', closeQrModal);
+      doneQrModalBtn.addEventListener('click', closeQrModal);
+
+      copyRoomCodeBtn.addEventListener('click', function () {
+        copyTextReliable(state.roomCode, 'Copied Room Code: ' + state.roomCode);
+      });
+
+      // Download self-contained copy of this HTML file to share with the other device
+      downloadHtmlCopyBtn.addEventListener('click', function () {
+        const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'shared_clipboard.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        showToast('Downloaded shared_clipboard.html — send it to your other device!');
+      });
+
+      closeLightboxBtn.addEventListener('click', function () {
+        imageLightboxModal.classList.add('hidden');
+        imageLightboxModal.classList.remove('flex');
+      });
+
+      window.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          closeQrModal();
+          imageLightboxModal.classList.add('hidden');
+          imageLightboxModal.classList.remove('flex');
+        }
+      });
+
+      // Always prompt for Room Code on startup/restart (pre-filling input only if URL hash has #room=...)
+      function initApp() {
+        renderAll();
+        if (window.location.hash && window.location.hash.includes('room=')) {
+          const match = window.location.hash.match(/room=([^&]+)/);
+          if (match && match[1]) {
+            gateRoomInput.value = sanitizeRoomCode(decodeURIComponent(match[1]));
+          }
+        }
+        openRoomGateModal();
+      }
+
+      initApp();
+    })();
+  </script>
+</body>
+</html>
